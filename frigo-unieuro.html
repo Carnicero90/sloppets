@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frigo Unieuro</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #fff; --fg: #1d1d1b; --muted: #6b6b66; --line: #e3e3de;
+    --accent: #0b6e4f; --warn: #b3541e;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #151514; --card: #1f1f1d; --fg: #ecece8; --muted: #9a9a93; --line: #33332f;
+            --accent: #4fc195; --warn: #e89a6a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, sans-serif; background: var(--bg); color: var(--fg); }
+  header { position: sticky; top: 0; z-index: 2; background: var(--bg); border-bottom: 1px solid var(--line); padding: 12px 16px; }
+  h1 { font-size: 18px; margin: 0 0 10px; }
+  .filters { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: end; }
+  .filters label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+  .filters label.chk { flex-direction: row; align-items: center; gap: 6px; color: var(--fg); font-size: 13px; }
+  input[type=number], select, input[type=search] {
+    font: inherit; padding: 5px 7px; border: 1px solid var(--line); border-radius: 6px;
+    background: var(--card); color: var(--fg); width: 110px;
+  }
+  input[type=search] { width: 180px; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--line); background: var(--card); color: var(--fg); cursor: pointer; }
+  #status { margin-top: 8px; font-size: 13px; color: var(--muted); }
+  #status.err { color: var(--warn); }
+  main { padding: 16px; display: grid; gap: 14px; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+  .card a.img { display: block; background: #fff; aspect-ratio: 1; }
+  .card img { width: 100%; height: 100%; object-fit: contain; }
+  .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .name { font-weight: 600; font-size: 13px; color: inherit; text-decoration: none; }
+  .name:hover { text-decoration: underline; }
+  .dims { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; }
+  .tags { display: flex; flex-wrap: wrap; gap: 4px; }
+  .tag { font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line); color: var(--muted); }
+  .tag.nofreezer { border-color: var(--accent); color: var(--accent); }
+  .price { margin-top: auto; display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; }
+  .price b { font-size: 17px; }
+  .price s { color: var(--muted); font-size: 12px; }
+  .cls { margin-left: auto; font-weight: 700; font-size: 12px; color: #fff; padding: 2px 7px; border-radius: 4px; }
+  .na { opacity: .55; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Frigoriferi Unieuro</h1>
+  <div class="filters">
+    <label>Larghezza max (mm)<input type="number" id="wMax" placeholder="es. 600" step="5"></label>
+    <label>Altezza max (mm)<input type="number" id="hMax" placeholder="es. 1800" step="10"></label>
+    <label>Prezzo max (€)<input type="number" id="pMax" placeholder="—" step="10"></label>
+    <label>Classe min
+      <select id="cls"><option value="">tutte</option>
+        <option>A</option><option>B</option><option>C</option><option>D</option><option>E</option><option>F</option></select>
+    </label>
+    <label>Tipo
+      <select id="type">
+        <option value="">tutti</option>
+        <option value="mono">monoporta (no combi/doppia/side)</option>
+        <option value="C7112">combinati</option>
+        <option value="C7114">doppia porta</option>
+        <option value="C7113">side by side / multidoor</option>
+      </select>
+    </label>
+    <label>Cerca<input type="search" id="q" placeholder="marca, modello…"></label>
+    <label>Ordina
+      <select id="sort">
+        <option value="price">prezzo ↑</option>
+        <option value="-price">prezzo ↓</option>
+        <option value="w">larghezza ↑</option>
+        <option value="h">altezza ↑</option>
+        <option value="cls">classe energetica</option>
+        <option value="disc">sconto % ↓</option>
+      </select>
+    </label>
+    <label class="chk"><input type="checkbox" id="noFreezer"> senza congelatore</label>
+    <label class="chk"><input type="checkbox" id="avail" checked> solo disponibili</label>
+    <button id="reload">Ricarica</button>
+    <label class="chk" title="Se il fetch fallisce, carica una risposta JSON salvata a mano">
+      <input type="file" id="file" accept=".json,.txt,application/json" hidden>
+      <button type="button" onclick="document.getElementById('file').click()">Carica JSON…</button>
+    </label>
+  </div>
+  <div id="status">Caricamento…</div>
+</header>
+<main id="grid"></main>
+
+<script>
+const CFG = {
+  endpoint: 'https://mnbcenyfii-1.algolianet.com/1/indexes/*/queries',
+  appId: 'MNBCENYFII',
+  apiKey: '977ed8d06b718d4929ca789c78c4107a',
+  index: 'sgmproducts_prod',
+  category: 'C7104',            // Frigoriferi
+  base: 'https://www.unieuro.it',
+};
+const MULTI = ['C7112', 'C7113', 'C7114']; // combinati, side by side, doppia porta
+const ATTRS = ['title_it','larghezza','altezza','profonditaGed','discountedPrice','originalPrice',
+  'classeEnergetica','capacitaNettaCongelatore','capacitaNettaFrigorifero','categories',
+  'facetAvailability','isAvailable','imageUrl','productUrl_it','posizionamentoApparecchio'];
+const CLS_ORDER = ['A','B','C','D','E','F','G'];
+const CLS_COLOR = { A:'#00893d', B:'#3aa935', C:'#9ec21a', D:'#e0c400', E:'#e59a00', F:'#e05a12', G:'#d51a1a' };
+
+let items = [];
+const $ = id => document.getElementById(id);
+
+const first = v => Array.isArray(v) ? v[0] : v;
+const mm = v => { const n = parseInt(first(v)); return Number.isFinite(n) ? n : null; };
+const litres = v => { const n = parseFloat(first(v)); return Number.isFinite(n) ? n : null; };
+const abs = u => !u ? '' : /^https?:/.test(u) ? u : CFG.base + u;
+const eur = n => n == null ? '' : n.toLocaleString('it-IT', { style: 'currency', currency: 'EUR' });
+
+function normalize(h) {
+  const cats = (h.categories || []).map(c => c.lvl3).filter(Boolean);
+  const freezer = litres(h.capacitaNettaCongelatore);
+  return {
+    id: h.objectID,
+    name: h.title_it || h.objectID,
+    w: mm(h.larghezza), h: mm(h.altezza), d: mm(h.profonditaGed),
+    price: h.discountedPrice ?? h.originalPrice ?? null,
+    orig: h.originalPrice ?? null,
+    cls: first(h.classeEnergetica) || '',
+    freezer, fridge: litres(h.capacitaNettaFrigorifero),
+    cats,
+    mono: !cats.some(c => MULTI.includes(c)),
+    avail: h.isAvailable ?? (h.facetAvailability === 'Disponibili'),
+    img: abs(h.imageUrl), url: abs(h.productUrl_it),
+    pos: first(h.posizionamentoApparecchio) || '',
+  };
+}
+
+async function load() {
+  status('Caricamento da Algolia…');
+  const params = new URLSearchParams({
+    hitsPerPage: 1000, page: 0, filters: 'isApproved=1',
+    facetFilters: JSON.stringify([[`categories.lvl3:${CFG.category}`]]),
+    attributesToRetrieve: JSON.stringify(ATTRS),
+    attributesToHighlight: '[]',
+  });
+  try {
+    // chiavi in query string + text/plain: "simple request", niente preflight CORS
+    const url = `${CFG.endpoint}?x-algolia-api-key=${CFG.apiKey}&x-algolia-application-id=${CFG.appId}`;
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: JSON.stringify({ requests: [{ indexName: CFG.index, params: params.toString() }] }),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    ingest(await res.json());
+  } catch (e) {
+    status(`Errore nel fetch (${e.message}). Puoi usare "Carica JSON…" con una risposta salvata.`, true);
+  }
+}
+
+function ingest(json) {
+  const hits = json.results ? json.results.flatMap(r => r.hits || []) : (json.hits || []);
+  const seen = new Set();
+  items = hits.filter(h => !seen.has(h.objectID) && seen.add(h.objectID)).map(normalize);
+  render();
+}
+
+function render() {
+  const wMax = +$('wMax').value || Infinity;
+  const hMax = +$('hMax').value || Infinity;
+  const pMax = +$('pMax').value || Infinity;
+  const clsMin = $('cls').value;
+  const type = $('type').value;
+  const q = $('q').value.trim().toLowerCase();
+  const noFreezer = $('noFreezer').checked;
+  const onlyAvail = $('avail').checked;
+
+  const list = items.filter(p =>
+    (p.w == null ? wMax === Infinity : p.w <= wMax) &&
+    (p.h == null ? hMax === Infinity : p.h <= hMax) &&
+    (p.price == null || p.price <= pMax) &&
+    (!clsMin || (p.cls && CLS_ORDER.indexOf(p.cls) <= CLS_ORDER.indexOf(clsMin))) &&
+    (!type || (type === 'mono' ? p.mono : p.cats.includes(type))) &&
+    (!q || p.name.toLowerCase().includes(q)) &&
+    (!noFreezer || !p.freezer) &&
+    (!onlyAvail || p.avail)
+  );
+
+  const s = $('sort').value;
+  const key = {
+    price: p => p.price ?? 1e9, '-price': p => -(p.price ?? 0),
+    w: p => p.w ?? 1e9, h: p => p.h ?? 1e9,
+    cls: p => p.cls ? CLS_ORDER.indexOf(p.cls) : 99,
+    disc: p => p.orig && p.price ? p.price / p.orig : 1,
+  }[s];
+  list.sort((a, b) => key(a) - key(b) || (a.price ?? 0) - (b.price ?? 0));
+
+  $('grid').innerHTML = list.map(card).join('');
+  status(`${list.length} di ${items.length} prodotti`);
+}
+
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+function card(p) {
+  const dims = [p.w, p.h, p.d].map(v => v ?? '?').join(' × ') + ' mm';
+  const tags = [];
+  if (p.mono) tags.push('<span class="tag">monoporta</span>');
+  if (p.freezer) tags.push(`<span class="tag">freezer ${p.freezer} l</span>`);
+  else tags.push('<span class="tag nofreezer">senza congelatore</span>');
+  if (p.fridge) tags.push(`<span class="tag">frigo ${p.fridge} l</span>`);
+  if (p.pos && p.pos !== 'Libera installazione') tags.push(`<span class="tag">${esc(p.pos)}</span>`);
+  const disc = p.orig && p.price && p.orig > p.price ? ` −${Math.round((1 - p.price / p.orig) * 100)}%` : '';
+  return `<article class="card${p.avail ? '' : ' na'}">
+    <a class="img" href="${esc(p.url)}" target="_blank" rel="noopener">
+      <img loading="lazy" src="${esc(p.img)}" alt=""></a>
+    <div class="body">
+      <a class="name" href="${esc(p.url)}" target="_blank" rel="noopener">${esc(p.name)}</a>
+      <div class="dims">L × A × P: ${dims}</div>
+      <div class="tags">${tags.join('')}</div>
+      <div class="price">
+        <b>${eur(p.price)}</b>
+        ${p.orig && p.orig > p.price ? `<s>${eur(p.orig)}</s><small>${disc}</small>` : ''}
+        ${p.cls ? `<span class="cls" style="background:${CLS_COLOR[p.cls] || '#777'}">${p.cls}</span>` : ''}
+      </div>
+    </div>
+  </article>`;
+}
+
+function status(msg, err = false) {
+  const el = $('status'); el.textContent = msg; el.classList.toggle('err', err);
+}
+
+// Filtri: ri-render istantaneo, stato salvato nell'URL (#w=600&h=1800…)
+const FIELDS = { wMax: 'w', hMax: 'h', pMax: 'p', cls: 'c', type: 't', q: 'q', sort: 's', noFreezer: 'nf', avail: 'a' };
+function saveHash() {
+  const u = new URLSearchParams();
+  for (const [id, k] of Object.entries(FIELDS)) {
+    const el = $(id);
+    const v = el.type === 'checkbox' ? (el.checked ? '1' : '0') : el.value;
+    if (v !== '') u.set(k, v);
+  }
+  history.replaceState(null, '', '#' + u);
+}
+function loadHash() {
+  const u = new URLSearchParams(location.hash.slice(1));
+  for (const [id, k] of Object.entries(FIELDS)) {
+    if (!u.has(k)) continue;
+    const el = $(id);
+    if (el.type === 'checkbox') el.checked = u.get(k) === '1'; else el.value = u.get(k);
+  }
+}
+for (const id of Object.keys(FIELDS)) $(id).addEventListener('input', () => { saveHash(); render(); });
+$('reload').addEventListener('click', load);
+$('file').addEventListener('change', async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { ingest(JSON.parse(await f.text())); } catch (err) { status('JSON non valido: ' + err.message, true); }
+});
+
+loadHash();
+load();
+</script>
+</body>
+</html>
